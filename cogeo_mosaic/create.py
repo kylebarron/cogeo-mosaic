@@ -1,7 +1,7 @@
 """cogeo_mosaic.create: Create MosaicJSON from features."""
 
 import warnings
-from typing import Dict, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import click
 import mercantile
@@ -13,13 +13,10 @@ from cogeo_mosaic.utils import _filter_and_sort, get_footprints
 
 def create_mosaic(
     dataset_list: Tuple,
-    minzoom: int = None,
-    maxzoom: int = None,
     max_threads: int = 20,
-    minimum_tile_cover: float = None,
-    tile_cover_sort: bool = False,
     version: str = "0.0.2",
     quiet: bool = True,
+    **kwargs,
 ) -> Dict:
     """
     Create mosaic definition content.
@@ -55,10 +52,10 @@ def create_mosaic(
     if not quiet:
         click.echo("Get files footprint", err=True)
 
-    results = get_footprints(dataset_list, max_threads=max_threads, quiet=quiet)
+    features = get_footprints(dataset_list, max_threads=max_threads, quiet=quiet)
 
     if minzoom is None:
-        minzoom = list(set([feat["properties"]["minzoom"] for feat in results]))
+        minzoom = list(set([feat["properties"]["minzoom"] for feat in features]))
         if len(minzoom) > 1:
             warnings.warn(
                 "Multiple MinZoom, Assets different minzoom values", UserWarning
@@ -67,7 +64,7 @@ def create_mosaic(
         minzoom = max(minzoom)
 
     if maxzoom is None:
-        maxzoom = list(set([feat["properties"]["maxzoom"] for feat in results]))
+        maxzoom = list(set([feat["properties"]["maxzoom"] for feat in features]))
         if len(maxzoom) > 1:
             warnings.warn(
                 "Multiple MaxZoom, Assets have multiple resolution values", UserWarning
@@ -75,20 +72,63 @@ def create_mosaic(
 
         maxzoom = max(maxzoom)
 
-    quadkey_zoom = minzoom
-
-    datatype = list(set([feat["properties"]["datatype"] for feat in results]))
+    datatype = list(set([feat["properties"]["datatype"] for feat in features]))
     if len(datatype) > 1:
         raise Exception("Dataset should have the same data type")
+
+    return create_mosaic_from_features(features, version=version, quiet=quiet, **kwargs)
+
+
+def create_mosaic_from_features(
+    features: List[Dict],
+    minzoom: int,
+    maxzoom: int,
+    quadkey_zoom: Optional[int] = None,
+    accessor: Callable[Dict, str] = lambda feature: feature["path"],
+    minimum_tile_cover: float = None,
+    tile_cover_sort: bool = False,
+    version: str = "0.0.2",
+    quiet: bool = True,
+):
+    """Create mosaic definition from footprints
+
+    Attributes
+    ----------
+    features: list[Dict], required
+        List of GeoJSON Features representing polygons of asset boundaries.
+    minzoom: int
+        Mosaic min-zoom.
+    maxzoom: int
+        Mosaic max-zoom.
+    quadkey_zoom: int, optional
+        Force quadkey zoom.
+    accessor: callable, optional
+        Function called on each feature to get its identifier
+    minimum_tile_cover: float, optional (default: 0)
+        Filter files with low tile intersection coverage.
+    tile_cover_sort: bool, optional (default: None)
+        Sort intersecting files by coverage.
+    version: str, optional
+        mosaicJSON definition version
+    quiet: bool, optional (default: True)
+        Mask processing steps.
+
+    Returns
+    -------
+    mosaic_definition : dict
+        Mosaic definition.
+    """
+
+    quadkey_zoom = quadkey_zoom or minzoom
 
     if not quiet:
         click.echo(f"Get quadkey list for zoom: {quadkey_zoom}", err=True)
 
     # Find dataset geometries
-    dataset_geoms = polygons([feat["geometry"]["coordinates"][0] for feat in results])
+    dataset_geoms = polygons([feat["geometry"]["coordinates"][0] for feat in features])
     bounds = total_bounds(dataset_geoms)
 
-    tiles = burntiles.burn(results, quadkey_zoom)
+    tiles = burntiles.burn(features, quadkey_zoom)
     tiles = [mercantile.Tile(*tile) for tile in tiles]
 
     mosaic_definition = dict(
@@ -120,7 +160,7 @@ def create_mosaic(
             continue
 
         intersections_geoms = [dataset_geoms[idx] for idx in intersections_idx]
-        intersections = [results[idx] for idx in intersections_idx]
+        intersections = [features[idx] for idx in intersections_idx]
 
         dataset = [
             {"path": f["properties"]["path"], "geometry": geom}
@@ -136,6 +176,6 @@ def create_mosaic(
             )
 
         if dataset:
-            mosaic_definition["tiles"][quadkey] = [f["path"] for f in dataset]
+            mosaic_definition["tiles"][quadkey] = [accessor(f) for f in dataset]
 
     return mosaic_definition
