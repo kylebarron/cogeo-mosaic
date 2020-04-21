@@ -1,16 +1,16 @@
 """tests cogeo_mosaic.utils."""
 
-import os
 import json
-from io import BytesIO
+import os
 from concurrent import futures
+from io import BytesIO
 
+import mercantile
 import pytest
 from mock import patch
 
-import mercantile
 from cogeo_mosaic import utils
-
+from cogeo_mosaic.create import create_mosaic
 
 mosaic_gz = os.path.join(os.path.dirname(__file__), "fixtures", "mosaic.json.gz")
 mosaic_json = os.path.join(os.path.dirname(__file__), "fixtures", "mosaic.json")
@@ -92,61 +92,6 @@ def test_footprint():
     assets = [asset1, asset2]
     foot = utils.get_footprints(assets)
     assert len(foot) == 2
-
-
-def test_mosaic_create():
-    """Fetch info from dataset and create the mosaicJSON definition."""
-    assets = [asset1, asset2]
-    mosaic = utils.create_mosaic(assets, quiet=False)
-    assert [round(b, 3) for b in mosaic["bounds"]] == [
-        round(b, 3) for b in mosaic_content["bounds"]
-    ]
-    assert mosaic["maxzoom"] == mosaic_content["maxzoom"]
-    assert mosaic["minzoom"] == mosaic_content["minzoom"]
-    assert list(mosaic["tiles"].keys()) == list(mosaic_content["tiles"].keys())
-
-    mosaic = utils.create_mosaic(assets, minzoom=7, maxzoom=9)
-    assert [round(b, 3) for b in mosaic["bounds"]] == [
-        round(b, 3) for b in mosaic_content["bounds"]
-    ]
-    assert mosaic["maxzoom"] == mosaic_content["maxzoom"]
-    assert mosaic["minzoom"] == mosaic_content["minzoom"]
-    assert list(mosaic["tiles"].keys()) == list(mosaic_content["tiles"].keys())
-
-    # 5% tile cover filter
-    mosaic = utils.create_mosaic(assets, minimum_tile_cover=0.05)
-    assert not list(mosaic["tiles"].keys()) == list(mosaic_content["tiles"].keys())
-
-    # sort by tile cover
-    mosaic = utils.create_mosaic(assets, tile_cover_sort=True)
-    assert list(mosaic["tiles"].keys()) == list(mosaic_content["tiles"].keys())
-    assert not mosaic["tiles"] == mosaic_content["tiles"]
-
-    assets = [asset1, asset2]
-    mosaic = utils.create_mosaic(assets)
-    assert [round(b, 3) for b in mosaic["bounds"]] == [
-        round(b, 3) for b in mosaic_content["bounds"]
-    ]
-    assert mosaic["maxzoom"] == mosaic_content["maxzoom"]
-
-    # Wrong MosaicJSON version
-    with pytest.raises(Exception):
-        utils.create_mosaic(assets, version="0.0.3")
-
-    with pytest.warns(None) as record:
-        mosaic = utils.create_mosaic([asset1_small, asset2], minzoom=7, maxzoom=9)
-        assert not len(record)
-
-    # Multiple MaxZoom
-    with pytest.warns(UserWarning):
-        assets = [asset1_small, asset2]
-        utils.create_mosaic(assets)
-
-    # Mixed datatype
-    with pytest.raises(Exception):
-        asset1_uint32
-        assets = [asset1_uint32, asset2]
-        utils.create_mosaic(assets)
 
 
 class MockResponse:
@@ -263,17 +208,17 @@ def test_tiles_to_bounds():
 
 def test_update_mosaic():
     """Create mosaic and update it."""
-    mosaic = utils.create_mosaic([asset1], minzoom=9)
+    mosaic = create_mosaic([asset1], minzoom=9)
     assert len(mosaic["tiles"]) == 36
 
-    mosaic = utils.create_mosaic([asset1], minzoom=9)
+    mosaic = create_mosaic([asset1], minzoom=9)
     assert mosaic["version"] == "1.0.0"
     utils.update_mosaic([asset2], mosaic)
     assert len(mosaic["tiles"]) == 48
     assert len(mosaic["tiles"]["030230132"]) == 2
     assert mosaic["version"] == "1.0.1"
 
-    mosaic = utils.create_mosaic([asset1], minzoom=9)
+    mosaic = create_mosaic([asset1], minzoom=9)
     utils.update_mosaic([asset2], mosaic, minimum_tile_cover=0.1)
     assert len(mosaic["tiles"]) == 47
     assert len(mosaic["tiles"]["030230132"]) == 1
